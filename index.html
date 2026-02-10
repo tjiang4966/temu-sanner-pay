@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temu Scanner 订阅与激活</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen flex flex-col justify-center items-center">
+
+    <div x-data="app()" x-init="checkUrlParams()" class="w-full max-w-md bg-white rounded-xl shadow-lg p-8">
+        
+        <div x-show="step === 'subscribe'" x-transition:enter="transition ease-out duration-300">
+            <h2 class="text-2xl font-bold mb-6 text-center text-indigo-600">选择订阅计划</h2>
+            
+            <div class="space-y-4">
+                <div class="border rounded-lg p-4 hover:border-indigo-500 cursor-pointer transition relative" 
+                     :class="{'border-indigo-500 bg-indigo-50': plan === 'monthly'}"
+                     @click="plan = 'monthly'">
+                    <div class="flex justify-between items-center">
+                        <span class="font-semibold">月度会员</span>
+                        <span class="text-xl font-bold">CA$49</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">有效期 30 天</p>
+                </div>
+                
+                <div class="border rounded-lg p-4 hover:border-indigo-500 cursor-pointer transition" 
+                     :class="{'border-indigo-500 bg-indigo-50': plan === 'yearly'}"
+                     @click="plan = 'yearly'">
+                    <div class="flex justify-between items-center">
+                        <span class="font-semibold">年度会员</span>
+                        <span class="text-xl font-bold">CA$299</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">有效期 365 天</p>
+                </div>
+            </div>
+
+            <button @click="goToPayment" class="w-full mt-8 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition duration-200">
+                前往支付
+            </button>
+        </div>
+
+        <div x-show="step === 'activate'" x-cloak x-transition:enter="transition ease-out duration-300">
+            <h2 class="text-2xl font-bold mb-2 text-center text-indigo-600">激活产品</h2>
+            <p class="text-center text-sm text-gray-500 mb-6">请输入您的订单号和机器码</p>
+
+            <form @submit.prevent="submitActivation">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">订单号 (Order ID)</label>
+                    <input type="text" x-model="form.orderId" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="通常在支付成功邮件或URL中">
+                </div>
+                
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">机器码 (Machine Code)</label>
+                    <input type="text" x-model="form.machineCode" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="例如: MAC-8829-XJ">
+                </div>
+
+                <div x-show="errorMessage" class="mb-4 p-3 bg-red-100 text-red-700 text-sm rounded-lg" x-text="errorMessage"></div>
+
+                <button type="submit" :disabled="loading" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition duration-200 flex justify-center items-center">
+                    <span x-show="!loading">生成/获取 授权码</span>
+                    <span x-show="loading" class="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></span>
+                </button>
+            </form>
+
+            <div x-show="result" class="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <p class="text-green-800 font-bold text-center mb-2">激活成功！</p>
+                <div class="text-xs text-gray-500 text-center">您的授权码：</div>
+                <div class="text-xl font-mono font-bold text-center select-all bg-white p-2 rounded border my-2" x-text="result?.activation_code"></div>
+                <div class="text-xs text-gray-500 text-center">
+                    到期时间: <span x-text="formatDate(result?.expiry_date)"></span>
+                </div>
+            </div>
+            
+            <button @click="step = 'subscribe'" class="w-full mt-4 text-sm text-gray-500 hover:text-gray-800 underline">返回首页</button>
+        </div>
+
+    </div>
+
+    <script>
+        function app() {
+            return {
+                step: 'subscribe',
+                plan: 'monthly',
+                loading: false,
+                errorMessage: '',
+                result: null,
+                form: {
+                    orderId: '',
+                    machineCode: ''
+                },
+                // 配置: 替换为你的 Supabase Edge Function URL
+                apiUrl: 'https://sezmnxmoxsfggzcxwbty.supabase.co/functions/v1/activate-license',
+                
+                // 配置: 替换为你的 Stripe Payment Link
+                stripeLinks: {
+                    monthly: 'https://buy.stripe.com/test_cNi6oGbuk9sp4VK6Va4Ja01', 
+                    yearly: 'https://buy.stripe.com/test_5kQ9AS1TKbAx5ZOenC4Ja00'
+                },
+
+                // 初始化：检查URL是否有 session_id (Stripe 支付成功后回跳)
+                checkUrlParams() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    // 假设 Stripe 支付成功后回跳 URL 是 http://yoursite.com/?session_id=...
+                    const sessionId = urlParams.get('session_id'); 
+                    if (sessionId) {
+                        this.step = 'activate';
+                        this.form.orderId = sessionId;
+                    }
+                },
+
+                goToPayment() {
+                    // 跳转到 Stripe
+                    // 确保 Stripe 后台设置的 Success URL 包含 ?session_id={CHECKOUT_SESSION_ID}
+                    window.location.href = this.stripeLinks[this.plan];
+                },
+
+                async submitActivation() {
+                    if (!this.form.orderId || !this.form.machineCode) {
+                        this.errorMessage = "请完整填写所有信息";
+                        return;
+                    }
+
+                    this.loading = true;
+                    this.errorMessage = '';
+                    this.result = null;
+
+                    try {
+                        const response = await fetch(this.apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                order_id: this.form.orderId,
+                                machine_code: this.form.machineCode
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (!response.ok) {
+                            throw new Error(data.error || '发生未知错误');
+                        }
+
+                        this.result = data;
+
+                    } catch (err) {
+                        this.errorMessage = err.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                formatDate(dateString) {
+                    if(!dateString) return '';
+                    return new Date(dateString).toLocaleDateString() + ' ' + new Date(dateString).toLocaleTimeString();
+                }
+            }
+        }
+    </script>
+</body>
+</html>
